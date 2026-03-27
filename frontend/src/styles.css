@@ -1,0 +1,56 @@
+body {
+  font-family: var(--sans);
+  background: var(--bg-gradient);
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+  position: relative;
+}
+
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  z-index: -2;
+  width: 520px;
+  height: 520px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.18), transparent 60%);
+  filter: blur(10px);
+}
+
+body::before {
+  top: -140px;
+  left: -120px;
+}
+
+body::after {
+  bottom: -160px;
+  right: -100px;
+}
+
+.noise-layer {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' fill='%23ffffff' fill-opacity='0'/%3E%3Ccircle cx='10' cy='10' r='1' fill='%233865F6' fill-opacity='0.18'/%3E%3Ccircle cx='40' cy='80' r='1' fill='%230ea5e9' fill-opacity='0.22'/%3E%3Ccircle cx='150' cy='140' r='1' fill='%232563eb' fill-opacity='0.16'/%3E%3C/svg%3E");
+  opacity: 0.35;
+}
+
+.container {
+  max-width: 520px;
+  padding: clamp(2rem, 4vw, 3.5rem);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.logo {
+  text-align: center;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--brand-dark);
+  margin-bottom: 12px;
+}
