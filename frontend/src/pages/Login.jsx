@@ -1,13 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import API from "../api";
 import logo from "../assets/secure-logo.svg";
+import { useAuth } from "../context/AuthContext";
 
 export default function Login() {
   const [data, setData] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const nav = useNavigate();
+  const { login: authenticate, isAuthenticated, lastError } = useAuth();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      nav("/dashboard", { replace: true });
+    }
+  }, [isAuthenticated, nav]);
 
   const login = async (e) => {
     e?.preventDefault();
@@ -21,17 +28,14 @@ export default function Login() {
       setLoading(true);
       setError("");
 
-      const res = await API.post("/auth/login", data);
-
-      if (typeof res.data === 'object' && res.data && res.data.token) {
-        const token = res.data.token;
-        localStorage.setItem("token", token);
-        nav("/dashboard");
-      } else {
-        setError("Invalid email or password");
-      }
+      await authenticate(data);
+      nav("/dashboard");
     } catch (err) {
-      setError(err?.response ? "Invalid email or password" : "Login failed. Please try again.");
+      const message =
+        err?.response?.data?.error ||
+        lastError ||
+        "Login failed. Please try again.";
+      setError(message);
     } finally {
       setLoading(false);
     }

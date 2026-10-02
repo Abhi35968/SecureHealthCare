@@ -1,33 +1,39 @@
 const jwt = require("jsonwebtoken");
+const config = require("../config");
 
-module.exports = (req, res, next) => {
-  const header = req.headers["authorization"];
+function authenticate(req, res, next) {
+  const header = req.headers.authorization;
 
-  console.log("=== AUTH MIDDLEWARE ===");
-  console.log("Full header:", header);
-  console.log("All headers:", req.headers);
-
-  if (!header) {
-    console.log("❌ No authorization header");
-    return res.status(401).json({ error: "No token provided" });
+  if (!header || !header.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Missing or invalid authorization header" });
   }
 
-  if (!header.startsWith("Bearer ")) {
-    console.log("❌ Invalid header format (should be 'Bearer <token>')");
-    return res.status(401).json({ error: "Invalid token format" });
-  }
-
-  const token = header.substring(7); // Remove "Bearer " prefix
-
-  console.log("Token to verify:", token.substring(0, 20) + "...");
+  const token = header.substring(7);
 
   try {
-    const verified = jwt.verify(token, "secret");
-    console.log("✅ Token verified, user ID:", verified.id);
+    const verified = jwt.verify(token, config.jwtSecret);
     req.user = verified;
     next();
   } catch (err) {
-    console.log("❌ JWT verification failed:", err.message);
-    return res.status(401).json({ error: "Invalid token: " + err.message });
+    return res.status(401).json({ error: "Invalid token" });
   }
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (roles.length && !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    next();
+  };
+}
+
+module.exports = {
+  authenticate,
+  requireRole,
 };

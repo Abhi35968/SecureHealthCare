@@ -1,13 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "../api";
+import { useAuth } from "../context/AuthContext";
+
+const fallbackTimeline = Array.from({ length: 7 }, (_, index) => {
+  const date = new Date();
+  date.setDate(date.getDate() - (6 - index));
+  return { day: date.toISOString().slice(0, 10), count: 0 };
+});
 
 export default function Dashboard() {
   const [records, setRecords] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({ activeSessions: 1, totalRecords: 0 });
+  const [stats, setStats] = useState({ activeSessions: 1, totalRecords: 0, timeline: [] });
   const navigate = useNavigate();
+  const { logout } = useAuth();
 
   const sortedRecords = [...records].sort((a, b) => {
     const timeDiff = new Date(b.created_at || 0) - new Date(a.created_at || 0);
@@ -16,68 +24,111 @@ export default function Dashboard() {
   });
   const totalRecords = sortedRecords.length;
   const recentRecords = sortedRecords.slice(0, 4);
-  const lastRecord = recentRecords[0]?.encrypted_data?.substring(0, 80) || "Upload a record to populate your vault.";
   const activeSessions = stats?.activeSessions ?? 0;
+  const timelineSeries = useMemo(() => {
+    const source = stats?.timeline?.length ? stats.timeline : fallbackTimeline;
+    return source.slice(-7).map((entry) => ({
+      day: entry.day || entry.date,
+      count: Number(entry.count) || 0,
+    }));
+  }, [stats?.timeline]);
+
+  const timelineMax = timelineSeries.reduce((max, entry) => Math.max(max, entry.count), 1);
+  const timelineTotal = timelineSeries.reduce((sum, entry) => sum + entry.count, 0);
+  const todayCount = timelineSeries[timelineSeries.length - 1]?.count ?? 0;
+
+  const formatDay = (value) => {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  };
+
   const metrics = [
     {
       label: "Records secured",
       value: totalRecords,
-      trend: totalRecords
-        ? `Latest ID #${recentRecords[0].id}`
-        : "Upload your first record",
+      trend: totalRecords ? `Latest ID #${recentRecords[0].id}` : "Upload your first record",
     },
     {
       label: "Active sessions",
       value: activeSessions,
-      trend:
-        activeSessions === 1
-          ? "Current user online"
-          : `${activeSessions} users authenticated`,
+      trend: activeSessions === 1 ? "Current user online" : `${activeSessions} users authenticated`,
+    },
+    {
+      label: "Records last 7 days",
+      value: timelineTotal,
+      trend: todayCount ? `${todayCount} processed today` : "Awaiting new submissions",
     },
   ];
-  const activityFeed = [];
+
+  const securityPillars = [
+    {
+      label: "In transit",
+      status: "TLS 1.3",
+      detail: "Forward secrecy & HSTS everywhere.",
+    },
+    {
+      label: "At rest",
+      status: "AES-256-CBC",
+      detail: "Fresh key + IV generated per record.",
+    },
+    {
+      label: "Audit trail",
+      status: "Streaming",
+      detail: "Uploads, decrypts, and downloads logged in real time.",
+    },
+  ];
+
+  const guardrails = [
+    {
+      icon: "🧪",
+      title: "Integrity receipts",
+      detail: "Upload endpoint returns audit IDs for downstream compliance stores.",
+    },
+    {
+      icon: "🛰️",
+      title: "Behavior analytics",
+      detail: "Rate limits + anomaly scoring protect against scripted dumps.",
+    },
+    {
+      icon: "🧾",
+      title: "Download transparency",
+      detail: "Every decrypt/export is watermark logged for 7 years.",
+    },
+  ];
 
   useEffect(() => {
-    const fetchStats = async (token) => {
+    const handleAuthFailure = (message) => {
+      setError(message);
+      logout();
+      setTimeout(() => navigate("/"), 1500);
+    };
+
+    const fetchStats = async () => {
       try {
-        const res = await axios.get("http://localhost:3000/stats", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await API.get("/stats", { params: { range: "7d" } });
         setStats(res.data);
-      } catch (statsErr) {
-        console.error("Failed to load stats", statsErr);
+      } catch (err) {
+        console.error("Failed to load stats", err);
       }
     };
 
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem("token");
-
-        if (!token || !token.includes(".")) {
-          setError("Session expired. Please login again.");
-          localStorage.removeItem("token");
-          setTimeout(() => navigate("/"), 1500);
-          setRecords([]);
-          return;
-        }
-
-        const res = await axios.get("http://localhost:3000/records", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await API.get("/records");
 
         if (Array.isArray(res.data)) {
           setRecords(res.data);
           setError(null);
-          fetchStats(token);
+          fetchStats();
         } else {
           setRecords([]);
           setError("Failed to fetch records. Invalid response format.");
         }
       } catch (err) {
-        if (err.response?.status === 401 || err.response?.data?.error?.includes("Invalid token")) {
-          setError("Session expired. Please login again.");
-          localStorage.removeItem("token");
-          setTimeout(() => navigate("/"), 1500);
+        if (err.response?.status === 401) {
+          handleAuthFailure("Session expired. Please login again.");
         } else {
           const errorMsg = typeof err.response?.data === "string"
             ? err.response?.data
@@ -91,7 +142,7 @@ export default function Dashboard() {
     };
 
     fetchData();
-  }, [navigate]);
+  }, [logout, navigate]);
 
   if (loading) {
     return (
@@ -119,7 +170,13 @@ export default function Dashboard() {
             </p>
             <div className="hero-actions">
               <button onClick={() => navigate("/upload")}>Upload record</button>
-              <button className="ghost" onClick={() => navigate("/")}>
+              <button
+                className="ghost"
+                onClick={() => {
+                  logout();
+                  navigate("/");
+                }}
+              >
                 Switch account
               </button>
             </div>
@@ -128,7 +185,7 @@ export default function Dashboard() {
             <button
               className="destructive"
               onClick={() => {
-                localStorage.removeItem("token");
+                logout();
                 navigate("/");
               }}
             >
@@ -151,6 +208,56 @@ export default function Dashboard() {
               <p className="metric-trend">{metric.trend}</p>
             </article>
           ))}
+        </section>
+
+        <section className="insight-grid">
+          <article className="security-card">
+            <p className="eyebrow" style={{ color: "var(--text-soft)", letterSpacing: "0.25em" }}>
+              Defense posture
+            </p>
+            <h3>Zero-trust perimeter</h3>
+            <ul className="status-list">
+              {securityPillars.map((pillar) => (
+                <li key={pillar.label}>
+                  <div>
+                    <p className="status-title">{pillar.label}</p>
+                    <p className="status-detail">{pillar.detail}</p>
+                  </div>
+                  <span className="status-pill secondary">{pillar.status}</span>
+                </li>
+              ))}
+            </ul>
+            <button className="ghost" type="button" onClick={() => navigate("/security")}>
+              Open security center →
+            </button>
+          </article>
+
+          <article className="timeline-card">
+            <div className="timeline-head">
+              <div>
+                <p className="eyebrow" style={{ marginBottom: 6 }}>7 day ingest</p>
+                <h3>Growth timeline</h3>
+              </div>
+              <div className="timeline-total">
+                <strong>{timelineTotal}</strong>
+                <small>records</small>
+              </div>
+            </div>
+            <div className="timeline-body">
+              {timelineSeries.map((entry, index) => {
+                const width = Math.max(6, Math.round((entry.count / timelineMax) * 100));
+                return (
+                  <div className="timeline-row" key={entry.day || index}>
+                    <span>{formatDay(entry.day)}</span>
+                    <div className="timeline-bar">
+                      <div style={{ width: `${width}%` }} />
+                    </div>
+                    <span className="timeline-count">{entry.count}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </article>
         </section>
 
         <section className="section-head">
@@ -191,6 +298,32 @@ export default function Dashboard() {
               </div>
             )}
           </div>
+          <aside className="action-card">
+            <h4>Continuity controls</h4>
+            <ul className="action-list">
+              {guardrails.map((item) => (
+                <li key={item.title}>
+                  <span>{item.icon}</span>
+                  <div>
+                    <p>{item.title}</p>
+                    <small>{item.detail}</small>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="session-card">
+              <p className="eyebrow" style={{ marginBottom: 4 }}>Active sessions</p>
+              <strong>{activeSessions}</strong>
+              <p>
+                {activeSessions === 1
+                  ? "Single clinician currently authenticated."
+                  : "Distributed workforce synced with the vault."}
+              </p>
+              <button className="ghost" type="button" onClick={() => navigate("/security")}>
+                Review controls
+              </button>
+            </div>
+          </aside>
         </div>
       </div>
     </div>
